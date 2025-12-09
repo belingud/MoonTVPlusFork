@@ -13,7 +13,11 @@ export interface M3U8DownloadTask {
   title: string;
   type: 'TS' | 'MP4';
   status: 'ready' | 'downloading' | 'pause' | 'done' | 'error';
-  finishList: Array<{ title: string; status: '' | 'is-downloading' | 'is-success' | 'is-error' }>;
+  finishList: Array<{
+    title: string;
+    status: '' | 'is-downloading' | 'is-success' | 'is-error';
+    retryCount?: number; // 重试次数
+  }>;
   tsUrlList: string[];
   requests: XMLHttpRequest[];
   mediaFileList: ArrayBuffer[];
@@ -232,6 +236,40 @@ export class M3U8Downloader {
   }
 
   /**
+   * 重试所有失败的片段
+   */
+  retryFailedSegments(taskId: string): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+
+    // 重置所有失败片段的状态
+    let hasError = false;
+    task.finishList.forEach((item) => {
+      if (item.status === 'is-error') {
+        item.status = '';
+        item.retryCount = 0;
+        hasError = true;
+      }
+    });
+
+    if (hasError) {
+      task.errorNum = 0;
+      task.status = 'downloading';
+
+      // 找到第一个失败的片段索引
+      let firstErrorIndex = task.rangeDownload.endSegment;
+      for (let i = task.rangeDownload.startSegment - 1; i < task.rangeDownload.endSegment; i++) {
+        if (task.finishList[i] && task.finishList[i].status === '') {
+          firstErrorIndex = Math.min(firstErrorIndex, i);
+        }
+      }
+
+      task.downloadIndex = firstErrorIndex;
+      this.downloadTS(task);
+    }
+  }
+
+  /**
    * 下载 TS 片段
    */
   private downloadTS(task: M3U8DownloadTask): void {
@@ -247,6 +285,9 @@ export class M3U8Downloader {
 
       if (task.finishList[index] && task.finishList[index].status === '') {
         task.finishList[index].status = 'is-downloading';
+        if (!task.finishList[index].retryCount) {
+          task.finishList[index].retryCount = 0;
+        }
 
         const xhr = new XMLHttpRequest();
         xhr.responseType = 'arraybuffer';
@@ -259,9 +300,36 @@ export class M3U8Downloader {
                 }
               });
             } else {
-              task.errorNum++;
-              task.finishList[index].status = 'is-error';
-              this.options.onError?.(task, `片段 ${index} 下载失败`);
+              // 下载失败，检查是否需要重试
+              const maxRetries = 3;
+              const currentRetry = task.finishList[index].retryCount || 0;
+
+              if (currentRetry < maxRetries) {
+                // 重试
+                task.finishList[index].retryCount = currentRetry + 1;
+                task.finishList[index].status = '';
+                console.log(`片段 ${index} 下载失败，正在重试 (${currentRetry + 1}/${maxRetries})...`);
+
+                // 延迟重试，避免立即重试
+                setTimeout(() => {
+                  if (task.status !== 'pause') {
+                    download();
+                  }
+                }, 1000 * (currentRetry + 1)); // 递增延迟
+              } else {
+                // 重试次数用完，标记为最终失败
+                task.errorNum++;
+                task.finishList[index].status = 'is-error';
+                this.options.onError?.(task, `片段 ${index} 下载失败（已重试 ${maxRetries} 次）`);
+
+                // 检查是否所有片段都已处理完成
+                if (task.finishNum + task.errorNum === task.rangeDownload.targetSegment) {
+                  if (task.errorNum > 0) {
+                    task.status = 'pause';
+                    this.options.onError?.(task, `下载完成，但有 ${task.errorNum} 个片段失败`);
+                  }
+                }
+              }
 
               if (task.downloadIndex < task.rangeDownload.endSegment) {
                 !isPause && download();
@@ -357,6 +425,7 @@ export class M3U8Downloader {
    * 获取 M3U8 文件
    */
   private async fetchM3U8(url: string): Promise<string> {
+    console.log('fetchM3U8 - 请求 URL:', url);
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.onreadystatechange = () => {
@@ -364,6 +433,7 @@ export class M3U8Downloader {
           if (xhr.status >= 200 && xhr.status < 300) {
             resolve(xhr.responseText);
           } else {
+            console.error('fetchM3U8 失败 - URL:', url, 'Status:', xhr.status);
             reject(new Error(`HTTP ${xhr.status}`));
           }
         }
@@ -428,14 +498,30 @@ export class M3U8Downloader {
    */
   private applyURL(targetURL: string, baseURL: string): string {
     if (targetURL.indexOf('http') === 0) {
+      // 如果目标 URL 包含 0.0.0.0，替换为当前浏览器的 host
+      if (targetURL.includes('0.0.0.0')) {
+        const currentOrigin = `${window.location.protocol}//${window.location.host}`;
+        return targetURL.replace(/https?:\/\/0\.0\.0\.0:\d+/, currentOrigin);
+      }
       return targetURL;
     } else if (targetURL[0] === '/') {
       const domain = baseURL.split('/');
-      return domain[0] + '//' + domain[2] + targetURL;
+      let origin = domain[0] + '//' + domain[2];
+      // 如果 origin 包含 0.0.0.0，替换为当前浏览器的 host
+      if (origin.includes('0.0.0.0')) {
+        origin = `${window.location.protocol}//${window.location.host}`;
+      }
+      return origin + targetURL;
     } else {
       const domain = baseURL.split('/');
       domain.pop();
-      return domain.join('/') + '/' + targetURL;
+      let result = domain.join('/') + '/' + targetURL;
+      // 如果结果包含 0.0.0.0，替换为当前浏览器的 host
+      if (result.includes('0.0.0.0')) {
+        const currentOrigin = `${window.location.protocol}//${window.location.host}`;
+        result = result.replace(/https?:\/\/0\.0\.0\.0:\d+/, currentOrigin);
+      }
+      return result;
     }
   }
 

@@ -10,6 +10,7 @@ interface DownloadContextType {
   startTask: (taskId: string) => void;
   pauseTask: (taskId: string) => void;
   cancelTask: (taskId: string) => void;
+  retryFailedSegments: (taskId: string) => void;
   getProgress: (taskId: string) => number;
   downloadingCount: number;
   showDownloadPanel: boolean;
@@ -62,6 +63,11 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
     setTasks(downloader.getAllTasks());
   }, [downloader]);
 
+  const retryFailedSegments = useCallback((taskId: string) => {
+    downloader.retryFailedSegments(taskId);
+    setTasks(downloader.getAllTasks());
+  }, [downloader]);
+
   const getProgress = useCallback((taskId: string) => {
     return downloader.getProgress(taskId);
   }, [downloader]);
@@ -77,6 +83,7 @@ export function DownloadProvider({ children }: { children: React.ReactNode }) {
         startTask,
         pauseTask,
         cancelTask,
+        retryFailedSegments,
         getProgress,
         downloadingCount,
         showDownloadPanel,

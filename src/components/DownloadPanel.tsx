@@ -5,7 +5,7 @@ import { useDownload } from '@/contexts/DownloadContext';
 import { M3U8DownloadTask } from '@/lib/m3u8-downloader';
 
 export function DownloadPanel() {
-  const { tasks, showDownloadPanel, setShowDownloadPanel, startTask, pauseTask, cancelTask, getProgress } = useDownload();
+  const { tasks, showDownloadPanel, setShowDownloadPanel, startTask, pauseTask, cancelTask, retryFailedSegments, getProgress } = useDownload();
 
   if (!showDownloadPanel) {
     return null;
@@ -127,8 +127,16 @@ export function DownloadPanel() {
 
                   {/* 错误信息 */}
                   {task.errorNum > 0 && (
-                    <div className='mb-3 text-xs text-red-500 dark:text-red-400'>
-                      {task.errorNum} 个片段下载失败
+                    <div className='mb-3 flex items-center justify-between'>
+                      <div className='text-xs text-red-500 dark:text-red-400'>
+                        {task.errorNum} 个片段下载失败
+                      </div>
+                      <button
+                        onClick={() => retryFailedSegments(task.id)}
+                        className='text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline'
+                      >
+                        重试失败片段
+                      </button>
                     </div>
                   )}
 
