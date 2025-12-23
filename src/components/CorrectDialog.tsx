@@ -5,6 +5,7 @@
 import { Search, X } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { getTMDBImageUrl } from '@/lib/tmdb.search';
 import { processImageUrl } from '@/lib/utils';
@@ -121,7 +122,7 @@ export default function CorrectDialog({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm'>
       <div className='bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col m-4'>
         {/* 头部 */}
@@ -158,7 +159,7 @@ export default function CorrectDialog({
               className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2'
             >
               <Search size={20} />
-              {searching ? '搜索中...' : '搜索'}
+              <span className='hidden sm:inline'>{searching ? '搜索中...' : '搜索'}</span>
             </button>
           </div>
           {error && (
@@ -229,6 +230,7 @@ export default function CorrectDialog({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
